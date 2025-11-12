@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -7,9 +8,19 @@ public class Loot : MonoBehaviour
     [Header("Loot Info")]
     [SerializeField] private string itemId = "scrap_value5";
     [SerializeField] private string itemDisplayName = "Scrap Value 5";
-    [SerializeField, Min(1)] private int amount = 1;
+    [SerializeField, Min(1)] private int scrapValue = 1;
+
+    [Header("Highlight Settings")]
+    [SerializeField] private bool useHighlight = true;
+    [SerializeField] private Color highlightColor = new Color(1f, 0.88f, 0f); // warm yellow default
+    [SerializeField, Min(0f)] private float highlightIntensity = 2.5f;
+    [SerializeField] private bool adjustOutline = true;
+    [SerializeField, Min(0f)] private float outlineWidth = 4f;
 
     private bool playerInRange;
+    private bool highlightActive;
+
+    private readonly List<MaterialHighlightState> highlightStates = new List<MaterialHighlightState>();
 
     private void Reset()
     {
@@ -30,27 +41,9 @@ public class Loot : MonoBehaviour
             col.isTrigger = true;
         }
 
-        // Item ID validasyonu
-        if (string.IsNullOrWhiteSpace(itemId))
-        {
-            Debug.LogError($"Loot on {name}: Item ID is empty or null! Please set a valid Item ID in the inspector. This loot cannot be collected.");
-        }
+        CacheHighlightMaterials();
 
-        // Display Name boşsa, Item ID'den otomatik isim oluştur
-        if (string.IsNullOrWhiteSpace(itemDisplayName))
-        {
-            if (!string.IsNullOrWhiteSpace(itemId))
-            {
-                // Item ID'yi daha okunabilir hale getir (örn: "scrap_value5" -> "Scrap Value 5")
-                itemDisplayName = FormatItemIdAsDisplayName(itemId);
-                Debug.LogWarning($"Loot on {name}: Display Name was empty. Auto-generated from Item ID: '{itemDisplayName}'");
-            }
-            else
-            {
-                itemDisplayName = "Unknown Item";
-                Debug.LogWarning($"Loot on {name}: Both Item ID and Display Name are empty! Using 'Unknown Item' as fallback.");
-            }
-        }
+        ValidateNaming();
     }
 
     private string FormatItemIdAsDisplayName(string id)
@@ -81,6 +74,7 @@ public class Loot : MonoBehaviour
         if (isPlayer)
         {
             playerInRange = true;
+            UpdateHighlight(true);
         }
     }
 
@@ -92,6 +86,7 @@ public class Loot : MonoBehaviour
         if (isPlayer)
         {
             playerInRange = false;
+            UpdateHighlight(false);
         }
     }
 
@@ -111,23 +106,156 @@ public class Loot : MonoBehaviour
 
     private void TryCollect()
     {
-        // Item ID kontrolü - eğer boşsa toplama işlemini durdur
-        if (string.IsNullOrWhiteSpace(itemId))
+        if (string.IsNullOrWhiteSpace(itemDisplayName))
         {
-            Debug.LogError($"[Loot] {name}: Cannot collect item - Item ID is empty! Please set a valid Item ID in the inspector.");
+            ValidateNaming();
+        }
+
+        if (InventoryManager.instance == null)
+        {
+            Debug.LogError($"[Loot] {name}: No InventoryManager instance found in the scene! Please add InventoryManager to a GameObject in the scene.");
             return;
         }
 
-        if (InventorySystem.Instance == null)
-        {
-            Debug.LogError($"[Loot] {name}: No InventorySystem instance found in the scene! Please add InventorySystem to a GameObject in the scene.");
-            return;
-        }
-
-        // Inventory'e ekle
-        InventorySystem.Instance.AddItem(itemId, itemDisplayName, amount);
+        Scrap scrap = new Scrap(itemDisplayName, scrapValue);
+        InventoryManager.instance.AddScrap(scrap);
         
         // Nesneyi tamamen yok et
         Destroy(gameObject);
+    }
+    private void ValidateNaming()
+    {
+        if (string.IsNullOrWhiteSpace(itemId) && string.IsNullOrWhiteSpace(itemDisplayName))
+        {
+            itemDisplayName = "Unknown Item";
+            Debug.LogWarning($"Loot on {name}: Both Item ID and Display Name are empty! Using 'Unknown Item' as fallback.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(itemDisplayName))
+        {
+            itemDisplayName = FormatItemIdAsDisplayName(itemId);
+            Debug.LogWarning($"Loot on {name}: Display Name was empty. Auto-generated from Item ID: '{itemDisplayName}'");
+        }
+    }
+
+    private void CacheHighlightMaterials()
+    {
+        highlightStates.Clear();
+
+        if (!useHighlight)
+        {
+            return;
+        }
+
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Material[] materials = renderer.materials;
+            foreach (Material mat in materials)
+            {
+                if (mat == null)
+                {
+                    continue;
+                }
+
+                bool hasEmissionProperty = mat.HasProperty("_EmissionColor");
+                Color originalEmission = hasEmissionProperty ? mat.GetColor("_EmissionColor") : Color.black;
+                bool originallyHadEmission = hasEmissionProperty && mat.IsKeywordEnabled("_EMISSION");
+                bool hasOutlineColor = adjustOutline && mat.HasProperty("_OutlineColor");
+                Color originalOutlineColor = hasOutlineColor ? mat.GetColor("_OutlineColor") : Color.black;
+                bool hasOutlineWidth = adjustOutline && mat.HasProperty("_OutlineWidth");
+                float originalOutlineWidth = hasOutlineWidth ? mat.GetFloat("_OutlineWidth") : 0f;
+
+                highlightStates.Add(new MaterialHighlightState
+                {
+                    Material = mat,
+                    OriginalEmission = originalEmission,
+                    OriginallyHadEmission = originallyHadEmission,
+                    HasEmissionProperty = hasEmissionProperty,
+                    HasOutlineColor = hasOutlineColor,
+                    OriginalOutlineColor = originalOutlineColor,
+                    HasOutlineWidth = hasOutlineWidth,
+                    OriginalOutlineWidth = originalOutlineWidth
+                });
+            }
+        }
+    }
+
+    private void UpdateHighlight(bool enable)
+    {
+        if (!useHighlight || highlightActive == enable)
+        {
+            return;
+        }
+
+        highlightActive = enable;
+
+        foreach (MaterialHighlightState state in highlightStates)
+        {
+            Material mat = state.Material;
+            if (mat == null)
+            {
+                continue;
+            }
+
+            if (state.HasEmissionProperty)
+            {
+                if (enable)
+                {
+                    mat.EnableKeyword("_EMISSION");
+                    mat.SetColor("_EmissionColor", highlightColor * Mathf.LinearToGammaSpace(highlightIntensity));
+                }
+                else
+                {
+                    mat.SetColor("_EmissionColor", state.OriginalEmission);
+                    if (state.OriginallyHadEmission)
+                    {
+                        mat.EnableKeyword("_EMISSION");
+                    }
+                    else
+                    {
+                        mat.DisableKeyword("_EMISSION");
+                    }
+                }
+            }
+
+            if (state.HasOutlineColor)
+            {
+                mat.SetColor("_OutlineColor", enable ? highlightColor : state.OriginalOutlineColor);
+            }
+
+            if (state.HasOutlineWidth)
+            {
+                mat.SetFloat("_OutlineWidth", enable ? outlineWidth : state.OriginalOutlineWidth);
+            }
+        }
+    }
+
+    private void OnDisable()
+    {
+        UpdateHighlight(false);
+    }
+
+    private void OnDestroy()
+    {
+        UpdateHighlight(false);
+    }
+
+    private struct MaterialHighlightState
+    {
+        public Material Material;
+        public Color OriginalEmission;
+        public bool OriginallyHadEmission;
+        public bool HasEmissionProperty;
+        public bool HasOutlineColor;
+        public Color OriginalOutlineColor;
+        public bool HasOutlineWidth;
+        public float OriginalOutlineWidth;
     }
 }

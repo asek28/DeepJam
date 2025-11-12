@@ -4,12 +4,19 @@ using UnityEngine.InputSystem;
 public class ComboSystem : MonoBehaviour
 {
 	private Animator anim;
+	private AudioSource audioSource;
 
 	[Header("Combo Settings")]
 	[Tooltip("Time window to chain next hit before combo resets (seconds)")]
 	public float comboResetTime = 1.25f; // was 0.5f
 	[Tooltip("Minimum time between two attack inputs (seconds)")]
 	public float minAttackInterval = 0.2f;
+
+	[Header("Audio Settings")]
+	[Tooltip("Optional explicit AudioSource. If not assigned, one will be fetched/created on this GameObject.")]
+	[SerializeField] private AudioSource hitAudioSource;
+	[Tooltip("List of hit SFX clips. Populate with SFX/Hit/Hit_01..Hit_04.")]
+	[SerializeField] private AudioClip[] hitClips;
 
 	private int comboCount = 0;
 	private float lastComboTime = 0f;
@@ -19,10 +26,31 @@ public class ComboSystem : MonoBehaviour
 	void Start()
 	{
 		anim = GetComponent<Animator>();
+
+		audioSource = hitAudioSource;
+		if (audioSource == null)
+		{
+			audioSource = GetComponent<AudioSource>();
+		}
+		if (audioSource == null)
+		{
+			audioSource = gameObject.AddComponent<AudioSource>();
+			audioSource.playOnAwake = false;
+		}
+
+		if (hitClips == null || hitClips.Length == 0)
+		{
+			Debug.LogWarning("ComboSystem: No hit SFX clips assigned. Assign clips in the inspector to enable hit sounds.");
+		}
 	}
 	
 	void Update()
 	{
+		if (InventoryManager.instance != null && InventoryManager.instance.IsInventoryVisible)
+		{
+			return;
+		}
+		
 		
 		bool attackPressed = false;
 		
@@ -81,6 +109,8 @@ public class ComboSystem : MonoBehaviour
 				
 				
 				Debug.Log($"Setting ComboCount to {comboCount} in Animator");
+
+				PlayRandomHitSound();
 			}
 			
 			
@@ -99,6 +129,20 @@ public class ComboSystem : MonoBehaviour
 			}
 			
 			Debug.Log("Combo reset!");
+		}
+	}
+
+	private void PlayRandomHitSound()
+	{
+		if (audioSource == null || hitClips == null || hitClips.Length == 0)
+		{
+			return;
+		}
+
+		AudioClip clip = hitClips[Random.Range(0, hitClips.Length)];
+		if (clip != null)
+		{
+			audioSource.PlayOneShot(clip);
 		}
 	}
 }

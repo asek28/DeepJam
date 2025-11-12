@@ -1,77 +1,91 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class Thresh_Spawner : MonoBehaviour
 {
     [Header("Spawn Settings")]
-    [SerializeField, Min(0)] private int scrapValue5Count = 3;
-    [SerializeField, Min(0)] private int scrapValue10Count = 1;
     [SerializeField, Min(0f)] private float spawnRadius = 5f;
     [SerializeField] private float spawnHeightOffset = 0f;
     [SerializeField] private bool randomizeYRotation = true;
+    [SerializeField, Min(1)] private int duplicatesPerTemplate = 1;
 
-    private Transform scrapValue5Template;
-    private Transform scrapValue10Template;
+    private readonly List<Transform> lootTemplates = new List<Transform>();
 
     private void Awake()
     {
-        scrapValue5Template = transform.Find("Scrap_value5");
-        scrapValue10Template = transform.Find("Scrap_value10");
+        lootTemplates.Clear();
 
-        DeactivateTemplate(scrapValue5Template);
-        DeactivateTemplate(scrapValue10Template);
+        Loot[] lootComponents = GetComponentsInChildren<Loot>(true);
+        foreach (Loot loot in lootComponents)
+        {
+            if (loot == null)
+            {
+                continue;
+            }
+
+            Transform templateTransform = loot.transform;
+            if (templateTransform == transform)
+            {
+                continue;
+            }
+
+            lootTemplates.Add(templateTransform);
+
+            if (templateTransform.gameObject.activeSelf)
+            {
+                templateTransform.gameObject.SetActive(false);
+            }
+        }
     }
 
     private void Start()
     {
         HideSpawner();
-        SpawnScrap(scrapValue5Template, scrapValue5Count);
-        SpawnScrap(scrapValue10Template, scrapValue10Count);
+        SpawnLoots();
     }
 
     private void HideSpawner()
     {
-        var renderers = GetComponents<Renderer>();
-        foreach (var renderer in renderers)
+        Renderer[] renderers = GetComponents<Renderer>();
+        foreach (Renderer renderer in renderers)
         {
             renderer.enabled = false;
         }
     }
 
-    private void DeactivateTemplate(Transform template)
+    private void SpawnLoots()
     {
-        if (template == null)
+        if (lootTemplates.Count == 0)
         {
-            Debug.LogWarning($"{name}: Missing template child.");
+            Debug.LogWarning($"{name}: No child templates with a Loot component found under Thresh_Spawner.");
             return;
         }
 
-        if (template.gameObject.activeSelf)
+        foreach (Transform template in lootTemplates)
         {
-            template.gameObject.SetActive(false);
-        }
-    }
+            if (template == null)
+            {
+                continue;
+            }
 
-    private void SpawnScrap(Transform template, int count)
-    {
-        if (template == null || count <= 0)
-        {
-            return;
-        }
+            for (int i = 0; i < duplicatesPerTemplate; i++)
+            {
+                Vector3 offset = Random.insideUnitSphere;
+                offset.y = 0f;
+                if (offset.sqrMagnitude > 0.001f)
+                {
+                    offset.Normalize();
+                }
+                offset *= Random.Range(0f, spawnRadius);
 
-        for (int i = 0; i < count; i++)
-        {
-            Vector3 offset = Random.insideUnitSphere;
-            offset.y = 0f;
-            offset.Normalize();
-            offset *= Random.Range(0f, spawnRadius);
+                Vector3 spawnPosition = transform.position + new Vector3(offset.x, spawnHeightOffset, offset.z);
+                Quaternion spawnRotation = randomizeYRotation
+                    ? Quaternion.Euler(0f, Random.Range(0f, 360f), 0f)
+                    : template.rotation;
 
-            Vector3 spawnPosition = transform.position + new Vector3(offset.x, spawnHeightOffset, offset.z);
-            Quaternion spawnRotation = randomizeYRotation
-                ? Quaternion.Euler(0f, Random.Range(0f, 360f), 0f)
-                : template.rotation;
-
-            GameObject instance = Instantiate(template.gameObject, spawnPosition, spawnRotation, transform.parent);
-            instance.SetActive(true);
+                GameObject instance = Instantiate(template.gameObject, spawnPosition, spawnRotation, transform.parent);
+                instance.SetActive(true);
+            }
         }
     }
 
